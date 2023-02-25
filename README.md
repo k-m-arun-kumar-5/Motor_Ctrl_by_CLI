@@ -1,6 +1,6 @@
 Description
 ===========
-Embedded C Program for Motor Power Control using AT89C51 Microcontroller with CLI Command using UART interface.
+Embedded C Program for Motor Power Control using AT89C51 Microcontroller using CLI Command with UART interface.
 
 CAUTION:
 =========
