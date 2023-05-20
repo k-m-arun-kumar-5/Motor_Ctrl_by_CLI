@@ -1,6 +1,7 @@
 Description
 ===========
-Embedded C Program for Motor Power Control using AT89C51 Microcontroller using CLI Command with UART interface. To run a motor type CLI command "MOTOR 1 ON" to stop running a motor type CLI Command "MOTOR 1 OFF".
+Embedded C Program for Motor Power Control using AT89C52 Microcontroller using CLI Command with UART interface. Microcontroller controls power supply for a DC Motors  through DC Motor Driver (L293D). There are 2 DC motors MOTOR 1 and MOTOR 2. DC Motor control command is entered in UART terminal. For DC Motor 1 command to stop running, enter in UART Terminal, CLI Command : "MOTOR 1 OFF" . For DC Motor 1 command to trigger running in clockwise direction, CLI Command : "MOTOR 1 ON". To know the DC MOTOR 1 current state, CLI Command : "MOTOR 1 STATUS". For trigger MOTOR 1 and MOTOR 2 or know its status, CLI Command: "MOTOR 3 ON" or "MOTOR 3 STATUS". MOTOR 3 indicates all DC motors ( ie in our case,  MOTOR 1 & MOTOR 2) in CLI command. ERR_RESET_SW is used to reset error condition when motor command input exceeds max chars. EMER_SW is used in
+emergency condition to stop running all MOTORS. 	
 
 CAUTION:
 =========
