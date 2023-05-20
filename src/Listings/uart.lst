@@ -1,0 +1,306 @@
+C51 COMPILER V9.60.0.0   UART                                                              05/20/2023 19:29:45 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE UART
+OBJECT MODULE PLACED IN .\Objects\uart.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE uart.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND PRINT(.\Listings\uart
+                    -.lst) TABS(2) OBJECT(.\Objects\uart.obj)
+
+line level    source
+
+   1          /* ********************************************************************
+   2          FILE                 : uart.c
+   3          
+   4          PURPOSE              : 
+   5             
+   6          AUTHOR               : K.M. Arun Kumar alias Arunkumar Murugeswaran
+   7             
+   8          KNOWN BUGS           : 
+   9          
+  10          NOTE                 :                
+  11          
+  12          CHANGE LOGS          :
+  13          
+  14          *****************************************************************************/
+  15          
+  16          #include "main.h"
+  17          
+  18          // ------  data type declarations ---------------------------
+  19          
+  20          // ------  function prototypes ------------------------------
+  21          static void UART_Rx_Char_Proc();
+  22          
+  23          // ------  constants ----------------------------------------
+  24          
+  25          
+  26          // ------  variables ----------------------------------------
+  27          uart_data_t uart_data;
+  28          
+  29          
+  30          /*------------------------------------------------------------*-
+  31          FUNCTION NAME  : UART_Init
+  32          
+  33          DESCRIPTION    : Initialize UART port            
+  34          
+  35          INPUT          : 
+  36          
+  37          OUTPUT         : 
+  38          
+  39          NOTE           : 
+  40          -*------------------------------------------------------------*/
+  41          void UART_Init(void)
+  42          {
+  43   1        #ifdef UART_EVENT == INTERRUPT
+*** WARNING C323 IN LINE 43 OF uart.c: newline expected, extra characters found
+  44   1          ES = 1; //serial Interrupt_Enable
+  45   1        #endif
+  46   1        
+  47   1        SCON = 0x50;    // setup serial port control 
+  48   1          TMOD = 0x20;    // hardware (9600 BAUD @11.0592MHZ) 
+  49   1          TH1  = 0xFD;    // TH1
+  50   1          TR1  = 1;     // Timer 1 on
+  51   1        
+  52   1        UART_Reset_Datas(UART_RESET_ALL_DATAS); 
+  53   1        Delay_in_Milli_Sec(1);  
+C51 COMPILER V9.60.0.0   UART                                                              05/20/2023 19:29:45 PAGE 2   
+
+  54   1        return;
+  55   1      }
+  56          
+  57          /*------------------------------------------------------------*-
+  58          FUNCTION NAME  : UART_Reset_Datas
+  59          
+  60          DESCRIPTION    :           
+  61          
+  62          INPUT          : 
+  63          
+  64          OUTPUT         : 
+  65          
+  66          NOTE           : 
+  67          -*------------------------------------------------------------*/
+  68          void UART_Reset_Datas(const unsigned char uart_reset_type)
+  69          {
+  70   1        switch(uart_reset_type)
+  71   1        {
+  72   2          case UART_RESET_ALL_DATAS:
+  73   2          case UART_RESET_ALL_RCVD_DATAS:
+  74   2              uart_data.rcvd_ready_flag = STATE_YES;         
+  75   2              uart_data.echo_rcvd_data_flag = STATE_YES;
+  76   2          case UART_RESET_READ_DATA:
+  77   2              uart_data.read_flag = STATE_YES;  
+  78   2          case UART_RESET_RCVD_BUFFER:    
+  79   2                Str_Fill_Char(uart_data.rcvd_str, STR_MAX_NUM_CHARS ,NULL_CHAR); 
+  80   2                uart_data.rcvd_str_num_chars = 0;
+  81   2              uart_data.rcvd_overflow_flag = STATE_NO;
+  82   2              uart_data.rcvd_char = NULL_CHAR;
+  83   2              uart_data.rcvd_terminator_char_flag = STATE_NO;      
+  84   2          if(uart_reset_type != UART_RESET_ALL_DATAS)
+  85   2              break;
+  86   2          case UART_RESET_ALL_TX_DATAS:
+  87   2                  uart_data.tx_ready_flag = STATE_YES;
+  88   2          break;  
+  89   2          
+  90   2        }
+  91   1        return;
+  92   1      }
+  93          /*------------------------------------------------------------*-
+  94          FUNCTION NAME  : UART_Tx_Char
+  95          
+  96          DESCRIPTION    : Transmit Char by polling          
+  97          
+  98          INPUT          : 
+  99          
+ 100          OUTPUT         : 
+ 101          
+ 102          NOTE           : 
+ 103          -*------------------------------------------------------------*/
+ 104          void UART_Tx_Char(const char tx_char)
+ 105          {
+ 106   1        if(uart_data.tx_ready_flag == STATE_YES)
+ 107   1        {
+ 108   2          SBUF = tx_char;
+ 109   2          uart_data.tx_ready_flag = STATE_NO; 
+ 110   2              #ifdef UART_EVENT == POLLING
+*** WARNING C323 IN LINE 110 OF uart.c: newline expected, extra characters found
+ 111   2               while (TI==0); //Transmit Char by polling 
+ 112   2                 TI = 0;
+ 113   2               uart_data.tx_ready_flag = STATE_YES; 
+ 114   2          #endif
+C51 COMPILER V9.60.0.0   UART                                                              05/20/2023 19:29:45 PAGE 3   
+
+ 115   2        }   
+ 116   1        return; 
+ 117   1      }
+ 118          
+ 119          /*------------------------------------------------------------*-
+ 120          FUNCTION NAME  : UART_Tx_Str
+ 121          
+ 122          DESCRIPTION    : Transmit String by polling          
+ 123          
+ 124          INPUT          : 
+ 125          
+ 126          OUTPUT         : 
+ 127          
+ 128          NOTE           : 
+ 129          -*------------------------------------------------------------*/
+ 130          void UART_Tx_Str(const char *const tx_str)
+ 131          {
+ 132   1           unsigned char index;
+ 133   1         
+ 134   1           for(index = 0; ((*(tx_str + index)) != NULL_CHAR); index++)
+ 135   1            UART_Tx_Char(*(tx_str + index));      
+ 136   1         return; 
+ 137   1      }
+ 138          
+ 139          #ifdef UART_EVENT == INTERRUPT
+*** WARNING C323 IN LINE 139 OF uart.c: newline expected, extra characters found
+ 140          /*------------------------------------------------------------*-
+ 141          FUNCTION NAME  : Serial_ISR 
+ 142          
+ 143          DESCRIPTION    : UART by Interrupt         
+ 144          
+ 145          INPUT          : 
+ 146          
+ 147          OUTPUT         : 
+ 148          
+ 149          NOTE           : 
+ 150          -*------------------------------------------------------------*/
+ 151          void Serial_ISR(void) interrupt 4
+ 152          {
+ 153   1        if(TI == 1)
+ 154   1        {
+ 155   2            TI = 0;           //clear uart transmit flag
+ 156   2            uart_data.tx_ready_flag = STATE_YES; 
+ 157   2        }
+ 158   1        if(RI == 1)
+ 159   1        {
+ 160   2          uart_data.rcvd_ready_flag = STATE_NO; 
+ 161   2          uart_data.rcvd_char = SBUF; 
+ 162   2          UART_Rx_Char_Proc();    
+ 163   2          RI = 0; //clear uart receive flag   
+ 164   2        }
+ 165   1      } 
+ 166          
+ 167          #else
+              /*------------------------------------------------------------*-
+              FUNCTION NAME  : UART_Rx_Char
+              
+              DESCRIPTION    : Receive Char by polling         
+              
+              INPUT          : 
+              
+              OUTPUT         : 
+C51 COMPILER V9.60.0.0   UART                                                              05/20/2023 19:29:45 PAGE 4   
+
+              
+              NOTE           : 
+              -*------------------------------------------------------------*/
+              char UART_Rx_Char()
+              {
+                if(uart_data.rcvd_str_num_chars + 1 >= STR_MAX_NUM_CHARS )
+                {
+                  uart_data.rcvd_overflow_flag = STATE_YES;
+                  return NULL_CHAR;
+                }
+                uart_data.rcvd_overflow_flag = STATE_NO;
+                if(uart_data.rcvd_ready_flag == STATE_YES ) 
+                {
+                    uart_data.rcvd_ready_flag = STATE_NO; 
+                      while (RI==0);
+                      uart_data.rcvd_char = SBUF;
+                    UART_Rx_Char_Proc();
+                    RI = 0;   
+                    return(uart_data.rcvd_char);    
+                }
+                return NULL_CHAR;   
+              }
+              #endif
+ 199          
+ 200          /*------------------------------------------------------------*-
+ 201          FUNCTION NAME  :  
+ 202          
+ 203          DESCRIPTION    :         
+ 204          
+ 205          INPUT          : 
+ 206          
+ 207          OUTPUT         : 
+ 208          
+ 209          NOTE           : 
+ 210          -*------------------------------------------------------------*/
+ 211          unsigned int UART_Read(const char **const read_str_ptr, const unsigned char *read_num_chars_ptr)
+ 212          {
+ 213   1        if(read_str_ptr == NULL_PTR || read_num_chars_ptr == NULL_PTR)
+ 214   1        {
+ 215   2          return ERR_NULL_PTR;
+ 216   2        }
+ 217   1        *read_str_ptr = uart_data.rcvd_str;
+ 218   1        read_num_chars_ptr = &uart_data.rcvd_str_num_chars; 
+ 219   1          
+ 220   1        return SUCCESS;
+ 221   1      }
+ 222          /*------------------------------------------------------------*-
+ 223          FUNCTION NAME  :  UART_Rx_Char_Proc
+ 224          
+ 225          DESCRIPTION    :         
+ 226          
+ 227          INPUT          : 
+ 228          
+ 229          OUTPUT         : 
+ 230          
+ 231          NOTE           : 
+ 232          -*------------------------------------------------------------*/
+ 233          static void UART_Rx_Char_Proc()
+ 234          {
+ 235   1        uart_data.read_flag = STATE_NO;
+ 236   1        if(uart_data.rcvd_str_num_chars + 1 < STR_MAX_NUM_CHARS)
+ 237   1        {
+C51 COMPILER V9.60.0.0   UART                                                              05/20/2023 19:29:45 PAGE 5   
+
+ 238   2           uart_data.rcvd_overflow_flag = STATE_NO;
+ 239   2               switch(uart_data.rcvd_char)
+ 240   2           {
+ 241   3                    case BACKSPACE_CHAR:
+ 242   3                   if(uart_data.rcvd_str_num_chars > 0)
+ 243   3                 {
+ 244   4                    if(uart_data.echo_rcvd_data_flag == STATE_YES)
+ 245   4                           UART_Tx_Char(uart_data.rcvd_char);
+ 246   4                     uart_data.rcvd_str[uart_data.rcvd_str_num_chars--] = NULL_CHAR;
+ 247   4                 }
+ 248   3              break;
+ 249   3                    case TERMINATOR_CHAR:
+ 250   3                 if(uart_data.echo_rcvd_data_flag == STATE_YES)
+ 251   3                      UART_Tx_Char(uart_data.rcvd_char);
+ 252   3                       uart_data.rcvd_terminator_char_flag = STATE_YES;
+ 253   3               uart_data.rcvd_str[uart_data.rcvd_str_num_chars] = NULL_CHAR;
+ 254   3                    break;
+ 255   3                    default:
+ 256   3                if(uart_data.echo_rcvd_data_flag == STATE_YES)
+ 257   3                     UART_Tx_Char(uart_data.rcvd_char);
+ 258   3                uart_data.rcvd_terminator_char_flag = STATE_NO; 
+ 259   3                  uart_data.rcvd_str[uart_data.rcvd_str_num_chars++] = uart_data.rcvd_char;
+ 260   3           }
+ 261   2        }
+ 262   1        else
+ 263   1              uart_data.rcvd_overflow_flag = STATE_YES;
+ 264   1        uart_data.rcvd_ready_flag = STATE_YES;
+ 265   1        
+ 266   1          return;      
+ 267   1      }    
+ 268          /*-------------------------------------------------------------------
+ 269            ------------------------ END OF FILE ------------------------------
+ 270          -------------------------------------------------------------------*/
+ 271          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    399    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     22      10
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  3 WARNING(S),  0 ERROR(S)

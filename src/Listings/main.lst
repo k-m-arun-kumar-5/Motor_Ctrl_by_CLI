@@ -1,1 +1,857 @@
+C51 COMPILER V9.60.0.0   MAIN                                                              05/20/2023 19:29:45 PAGE 1   
 
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE MAIN
+OBJECT MODULE PLACED IN .\Objects\main.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE main.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND PRINT(.\Listings\main
+                    -.lst) TABS(2) OBJECT(.\Objects\main.obj)
+
+line level    source
+
+   1          /* ********************************************************************
+   2          FILE                   : main.c
+   3          
+   4          PROGRAM DESCRIPTION    : Program for the 8051 for a DC Motor control through DC Driver is given by Microco
+             -ntroller. 
+   5                                   There are 2 DC motors MOTOR 1 and MOTOR 2. 
+   6                                   DC Motor control command is entered in UART terminal. 
+   7                       For DC Motor 1 command to stop running, enter in UART Terminal, CLI Command : "MOTOR 1 OFF" , 
+   8                       For DC Motor 1 command to trigger running in clockwise direction, CLI Command : "MOTOR 1 ON",
+   9                                   To know the DC MOTOR 1 current state, CLI Command : "MOTOR 1 STATUS" 
+  10                       For trigger MOTOR 1 and MOTOR 2 or know its status, CLI Command: MOTOR 3 ON.
+  11                       or MOTOR 3 STATUS. MOTOR 3 indicates all DC motors ( ie in our case,  MOTOR 1 & MOTOR 2) in CLI com
+             -mand. 
+  12                       ERR_RESET_SW is used to reset error condition when motor command input exceeds max chars. EMER_SW i
+             -s used in
+  13                       emergency condition to stop running all MOTORS.             
+  14             
+  15          AUTHOR                : K.M. Arun Kumar alias Arunkumar Murugeswaran
+  16             
+  17          KNOWN BUGS            : 
+  18          
+  19          NOTE                  :                   
+  20                                              
+  21          CHANGE LOGS           : 
+  22          
+  23          *****************************************************************************/
+  24          
+  25          #include "main.h"
+  26          #include <string.h>
+  27          #include <stdio.h>
+  28          #include <stdlib.h>
+  29          
+  30          typedef enum 
+  31          {
+  32            MOTOR_ALREADY_OFF = NUM_ERR_STATUS, MOTOR_TURNED_OFF, MOTOR_ALREADY_RUN_CLOCKWISE, MOTOR_TURNED_CLOCKWISE
+             -, 
+  33            ERR_MOTOR_UNKNOWN_STATE, ERR_MOTOR_ID_INVALID, ERR_CMD_MOTOR_TURN_INVALID, FSM_RCVD_CMD_CHAR = 0, FSM_PRO
+             -C_RCVD_INPUT_CMD,
+  34            FSM_EXCEEDS_INPUT_CHARS, FSM_EMERGENCY_MOTORS_OFF 
+  35          } appl_status_err_t;
+  36                  
+  37          typedef struct 
+  38          {
+  39             unsigned int motor_id            : 3;
+  40             unsigned int cur_fsm_motor_state : 3;  
+  41             unsigned int init_state          : 2;
+  42          }  motor_data_t;   
+  43          
+  44          typedef struct
+  45          {
+  46            unsigned int error_reset_sw_enable_flag : 1;
+  47              unsigned int emergency_stop_enable_flag : 1;  
+  48            unsigned int emergency_stop_occured_flag : 1;
+  49            unsigned int fsm_system                  : 5;
+C51 COMPILER V9.60.0.0   MAIN                                                              05/20/2023 19:29:45 PAGE 2   
+
+  50          } ctrl_status_system_t;
+  51          
+  52          
+  53          static ctrl_status_system_t  ctrl_status_system;  
+  54          static motor_data_t motor_ids[NUM_MOTORS];      
+  55          static char *motor_cmd_rcvd_str;
+  56          static const char motor_str[] = "MOTOR", motor_off_cmd_str[] = "OFF", motor_clockwise_cmd_str[] = "ON", mo
+             -tor_status_cmd_str[] = "STATUS";  
+  57          static unsigned char motor_cmd_rcvd_str_num_chars = 0; 
+  58          static char motor_id_str[MOTOR_ID_NUM_CHARS + 1];
+  59          
+  60          void Ext_int_Init();
+  61          static unsigned char UART_Motor_Menu(const unsigned int motor_id);
+  62          static unsigned char FSM_Motor_Proc(const unsigned int motor_id, const unsigned char motor_cmd);
+  63          static unsigned char DC_Motor_Init(const unsigned int cur_motor_id, const unsigned char init_fsm_motor_sta
+             -te);
+  64          static unsigned char DC_Motor_Cmd_Off(const unsigned int motor_id);
+  65          static unsigned char DC_Motor_Cmd_Clockwise(const unsigned int motor_id);
+  66          /*------------------------------------------------------------*-
+  67          FUNCTION NAME  : main
+  68          
+  69          DESCRIPTION    :          
+  70                          
+  71          INPUT          : none
+  72          
+  73          OUTPUT         : 
+  74          
+  75          NOTE           : 
+  76          -*------------------------------------------------------------*/
+  77          
+  78          void main(void)
+  79          {
+  80   1         char *token_str;
+  81   1         unsigned char ret_status, num_token;
+  82   1         unsigned long int sw_timeout = SW_DEBOUNCE_COUNT;
+  83   1         unsigned int motor_id, cur_motor_id;
+  84   1         
+  85   1           /* ========= begin : USER CODE INITIALIZE ========== */
+  86   1         ERROR_LED = 0;         //output for MCU
+  87   1         ERR_RESET_SW = 1;
+  88   1         ERROR_LED = 0; 
+  89   1         EA  = 1; // Enable global interrupt 
+  90   1         UART_Init(); 
+  91   1         Ext_int_Init();
+  92   1         ctrl_status_system.emergency_stop_enable_flag = STATE_ON;
+  93   1         ctrl_status_system.error_reset_sw_enable_flag = STATE_OFF;
+  94   1           DC_Motor_Init(0, FSM_MOTOR_IN_OFF);
+  95   1         DC_Motor_Init(1, FSM_MOTOR_IN_OFF);    
+  96   1           UART_Tx_Str("\rINPUT: Motor Commmand - ENTER : ");
+  97   1         ctrl_status_system.fsm_system = FSM_RCVD_CMD_CHAR;
+  98   1           /* ========= end : USER CODE INITIALIZE ========== */
+  99   1          
+ 100   1           while(1) // Super Loop
+ 101   1           {
+ 102   2           switch(ctrl_status_system.fsm_system)
+ 103   2           {
+ 104   3             case FSM_RCVD_CMD_CHAR:
+ 105   3              if(uart_data.rcvd_terminator_char_flag == STATE_NO)
+ 106   3              {
+ 107   4                if(uart_data.rcvd_overflow_flag == STATE_YES)
+ 108   4                {
+ 109   5                  ctrl_status_system.error_reset_sw_enable_flag = STATE_ON;
+C51 COMPILER V9.60.0.0   MAIN                                                              05/20/2023 19:29:45 PAGE 3   
+
+ 110   5                              ctrl_status_system.fsm_system = FSM_EXCEEDS_INPUT_CHARS;  
+ 111   5                              ERROR_LED = STATE_ON;
+ 112   5                      UART_Tx_Str("\r ERR: Input chars > MAX Chars");
+ 113   5                      UART_Tx_Str("\r REQ: Press ERROR RESET SW \r"); 
+ 114   5                }
+ 115   4              }
+ 116   3              else
+ 117   3              {
+ 118   4                UART_Read(&motor_cmd_rcvd_str, &motor_cmd_rcvd_str_num_chars);
+ 119   4                UART_Tx_Str("Entered Motor command : ");
+ 120   4                    UART_Tx_Str(motor_cmd_rcvd_str); 
+ 121   4                    UART_Tx_Char(NEXT_LINE_CHAR); 
+ 122   4                ctrl_status_system.fsm_system = FSM_PROC_RCVD_INPUT_CMD;
+ 123   4              }
+ 124   3                    break;
+ 125   3              case FSM_PROC_RCVD_INPUT_CMD:
+ 126   3                num_token = 1;
+ 127   3                ret_status = SUCCESS;
+ 128   3                token_str = strtok(motor_cmd_rcvd_str, " ");
+ 129   3              while(token_str != NULL && ret_status != ERR_CMD_MOTOR_TURN_INVALID && num_token <= 4)
+ 130   3              {
+ 131   4                switch(num_token)
+ 132   4                {
+ 133   5                             case 1:    //motor
+ 134   5                                if(!strcmp(motor_str, token_str))
+ 135   5                    {
+ 136   6                       ++num_token;
+ 137   6                    }
+ 138   5                                else
+ 139   5                                {
+ 140   6                        ret_status = ERR_CMD_MOTOR_TURN_INVALID;
+ 141   6                      UART_Tx_Str("\r ERR: Due to MOTOR \r");
+ 142   6                                } 
+ 143   5                             break;
+ 144   5                   case 2: 
+ 145   5                     motor_id = (unsigned int) atoi(token_str);
+ 146   5                   if(motor_id > NUM_MOTORS + 1 || motor_id <= 0)
+ 147   5                   {
+ 148   6                       ret_status = ERR_CMD_MOTOR_TURN_INVALID;
+ 149   6                       UART_Tx_Str("\r ERR: Due to MOTOR ID \r");
+ 150   6                   }
+ 151   5                   else
+ 152   5                   {
+ 153   6                                    sprintf(motor_id_str, "%d",motor_id);
+ 154   6                      if(!strcmp(token_str, motor_id_str))
+ 155   6                      {
+ 156   7                        ++num_token;
+ 157   7                      }
+ 158   6                      else
+ 159   6                      {
+ 160   7                           ret_status = ERR_CMD_MOTOR_TURN_INVALID;
+ 161   7                           UART_Tx_Str("\r ERR: Due to MOTOR ID is not num \r");
+ 162   7                      }
+ 163   6                   }
+ 164   5                             break;
+ 165   5                             case 3:
+ 166   5                                if(!strcmp(motor_clockwise_cmd_str, token_str))
+ 167   5                                   ret_status = CMD_MOTOR_TURN_CLOCKWISE;
+ 168   5                                else if(!strcmp(motor_off_cmd_str, token_str))
+ 169   5                                     ret_status = CMD_MOTOR_TURN_OFF;
+ 170   5                                     else if(!strcmp(motor_status_cmd_str, token_str))
+ 171   5                            ret_status = CMD_MOTOR_STATUS;
+C51 COMPILER V9.60.0.0   MAIN                                                              05/20/2023 19:29:45 PAGE 4   
+
+ 172   5                         else
+ 173   5                         {
+ 174   6                                               ret_status = ERR_CMD_MOTOR_TURN_INVALID;
+ 175   6                           UART_Tx_Str("\r ERR: Due to MOTOR command \r");
+ 176   6                           }
+ 177   5                                ++num_token;                 
+ 178   5                              break;
+ 179   5                              default:
+ 180   5                                ret_status = ERR_CMD_MOTOR_TURN_INVALID;  
+ 181   5                                UART_Tx_Str("\r ERR: Due to exceeds token count \r");                         
+ 182   5                }
+ 183   4                token_str = strtok(NULL, " ");
+ 184   4              }
+ 185   3              UART_Reset_Datas(UART_RESET_ALL_DATAS);
+ 186   3              if(num_token != 4 || token_str != NULL || ret_status == ERR_CMD_MOTOR_TURN_INVALID)
+ 187   3              {
+ 188   4                 ret_status = ERR_CMD_MOTOR_TURN_INVALID;
+ 189   4                 motor_id = NUM_MOTORS;          
+ 190   4                 UART_Motor_Menu(motor_id);
+ 191   4                 ERROR_LED = STATE_ON;
+ 192   4              }
+ 193   3              else
+ 194   3              {
+ 195   4                           --motor_id;
+ 196   4                  if(ret_status == CMD_MOTOR_STATUS)
+ 197   4                  {               
+ 198   5                     UART_Motor_Menu(motor_id);
+ 199   5                  }
+ 200   4                    else
+ 201   4                          { 
+ 202   5                       switch(motor_id)
+ 203   5                   {             
+ 204   6                       case 0:
+ 205   6                               case 1:
+ 206   6                                   cur_motor_id = motor_id;                  
+ 207   6                               break;
+ 208   6                                   default:
+ 209   6                                  cur_motor_id = 0;
+ 210   6                   }                
+ 211   5                               UART_Tx_Str("\r MOTOR(S) COMMAND STATE \r");
+ 212   5                             UART_Tx_Str("==========================\r");
+ 213   5                               for (; cur_motor_id < NUM_MOTORS ; ++cur_motor_id)
+ 214   5                             {
+ 215   6                               UART_Tx_Str(motor_str);
+ 216   6                               sprintf(motor_id_str, " %u ", cur_motor_id + 1);
+ 217   6                               UART_Tx_Str(motor_id_str);
+ 218   6                       FSM_Motor_Proc(cur_motor_id, ret_status); 
+ 219   6                                   if(motor_id < NUM_MOTORS)
+ 220   6                                         break;                
+ 221   6                   }
+ 222   5                  }             
+ 223   4              }
+ 224   3                      UART_Tx_Str("\rINPUT: Motor Commmand - ENTER : ");
+ 225   3              ctrl_status_system.fsm_system = FSM_RCVD_CMD_CHAR;
+ 226   3               break;      
+ 227   3             case FSM_EXCEEDS_INPUT_CHARS:
+ 228   3                 if(ctrl_status_system.error_reset_sw_enable_flag == STATE_ON)
+ 229   3               {
+ 230   4                    sw_timeout = SW_DEBOUNCE_COUNT;
+ 231   4                  if(ERR_RESET_SW == 0) // sw pressed
+ 232   4                  {
+ 233   5                    Delay_in_Milli_Sec(SW_DEBOUNCE_TIMEOUT);
+C51 COMPILER V9.60.0.0   MAIN                                                              05/20/2023 19:29:45 PAGE 5   
+
+ 234   5                    while(ERR_RESET_SW == 0 && --sw_timeout != 0);
+ 235   5                              UART_Reset_Datas(UART_RESET_ALL_DATAS); 
+ 236   5                  ERROR_LED = STATE_OFF;
+ 237   5                  UART_Tx_Str("\rINPUT: Motor Commmand - ENTER : ");              
+ 238   5                  ctrl_status_system.error_reset_sw_enable_flag = STATE_OFF;
+ 239   5                  ctrl_status_system.fsm_system = FSM_RCVD_CMD_CHAR;
+ 240   5                }        
+ 241   4                  }
+ 242   3                   break;
+ 243   3             case FSM_EMERGENCY_MOTORS_OFF:   
+ 244   3                      if(ctrl_status_system.emergency_stop_occured_flag == STATE_ON)
+ 245   3                   {
+ 246   4                 ctrl_status_system.emergency_stop_enable_flag = STATE_OFF;
+ 247   4                     for(cur_motor_id = 0; cur_motor_id < NUM_MOTORS; ++cur_motor_id)
+ 248   4                         DC_Motor_Cmd_Off(cur_motor_id);
+ 249   4                    UART_Reset_Datas(UART_RESET_ALL_DATAS); 
+ 250   4                    ERROR_LED = STATE_OFF;
+ 251   4                    ctrl_status_system.emergency_stop_occured_flag = STATE_OFF;
+ 252   4                    UART_Tx_Str("\r Due to Emergency - Motors OFF");
+ 253   4                    UART_Tx_Str("\rINPUT: Motor Commmand - ENTER : ");
+ 254   4                ctrl_status_system.fsm_system = FSM_RCVD_CMD_CHAR;  
+ 255   4                          EX0 = 1;
+ 256   4                          IT0 = 1;          
+ 257   4                  }        
+ 258   3               break;   
+ 259   3           }
+ 260   2         }     
+ 261   1        return; 
+ 262   1      }
+ 263          
+ 264          /*------------------------------------------------------------*
+ 265          FUNCTION NAME  : Ext_int_Init
+ 266          
+ 267          DESCRIPTION    :
+ 268                          
+ 269          INPUT          : 
+ 270          
+ 271          OUTPUT         : 
+ 272          
+ 273          NOTE           : 
+ 274          
+ 275          Func ID        :   
+ 276          -*------------------------------------------------------------*/
+ 277          void Ext_int_Init()       
+ 278          {
+ 279   1        //INT0 = 0;
+ 280   1        EX0 = 1;        /* Enable Ext. interrupt0 */
+ 281   1        IT0 = 1;        /* Select Ext. interrupt0 on falling edge */  
+ 282   1      }
+ 283          
+ 284          void External0_ISR() interrupt 0
+ 285          {
+ 286   1        EX0 = 0;        /* Disable Ext. interrupt0 */
+ 287   1        ctrl_status_system.emergency_stop_occured_flag = STATE_ON;
+ 288   1        ctrl_status_system.fsm_system = FSM_EMERGENCY_MOTORS_OFF; 
+ 289   1      } 
+ 290          
+ 291          /*------------------------------------------------------------*
+ 292          FUNCTION NAME  : UART_Motor_Menu
+ 293          
+ 294          DESCRIPTION    :
+ 295                          
+C51 COMPILER V9.60.0.0   MAIN                                                              05/20/2023 19:29:45 PAGE 6   
+
+ 296          INPUT          : 
+ 297          
+ 298          OUTPUT         : 
+ 299          
+ 300          NOTE           : 
+ 301          
+ 302          Func ID        :   
+ 303          -*------------------------------------------------------------*/
+ 304          unsigned char UART_Motor_Menu(const unsigned int motor_id)
+ 305          {
+ 306   1        unsigned int cur_motor_id;  
+ 307   1        
+ 308   1          switch(motor_id)
+ 309   1        {
+ 310   2          case 0:
+ 311   2          case 1:
+ 312   2              cur_motor_id = motor_id;                 
+ 313   2          break;
+ 314   2              default:
+ 315   2             cur_motor_id = 0;         
+ 316   2        }
+ 317   1        UART_Tx_Str("\r MOTOR(S) CURRENT STATE \r");
+ 318   1        UART_Tx_Str("==========================\r");
+ 319   1        for (; cur_motor_id < NUM_MOTORS ; ++cur_motor_id)
+ 320   1        {
+ 321   2          UART_Tx_Str(motor_str);
+ 322   2          sprintf(motor_id_str, " %u ", cur_motor_id + 1);
+ 323   2          UART_Tx_Str(motor_id_str);
+ 324   2          switch(motor_ids[cur_motor_id].cur_fsm_motor_state)
+ 325   2              {
+ 326   3                 case FSM_MOTOR_IN_UNKNOWN_STATE:       
+ 327   3                    UART_Tx_Str("in unknown state\r");           
+ 328   3                   break;     
+ 329   3                 case FSM_MOTOR_IN_OFF:
+ 330   3                    UART_Tx_Str("is in OFF state\r");
+ 331   3                 break;
+ 332   3                   case FSM_MOTOR_IN_CLOCKWISE:      
+ 333   3                      UART_Tx_Str("is running in clockwise\r");
+ 334   3                   break;                            
+ 335   3           }
+ 336   2           if(motor_id < NUM_MOTORS)
+ 337   2               break;      
+ 338   2        }
+ 339   1        return SUCCESS; 
+ 340   1      }
+ 341          
+ 342          /*------------------------------------------------------------*
+ 343          FUNCTION NAME  : FSM_Motor_Proc
+ 344          
+ 345          DESCRIPTION    :
+ 346                          
+ 347          INPUT          : 
+ 348          
+ 349          OUTPUT         : 
+ 350          
+ 351          NOTE           : 
+ 352          
+ 353          Func ID        :   
+ 354          -*------------------------------------------------------------*/
+ 355          unsigned char FSM_Motor_Proc(const unsigned int motor_id, const unsigned char motor_cmd)
+ 356          {
+ 357   1        const char already_str[] = "already ";  
+C51 COMPILER V9.60.0.0   MAIN                                                              05/20/2023 19:29:45 PAGE 7   
+
+ 358   1        unsigned int cur_motor_id = motor_id;
+ 359   1        unsigned int ret_status = SUCCESS;
+ 360   1        
+ 361   1        
+ 362   1        switch(motor_id)
+ 363   1        {
+ 364   2          case 0:
+ 365   2          case 1:
+ 366   2               cur_motor_id = motor_id;                   
+ 367   2          break;
+ 368   2              default:
+ 369   2             cur_motor_id = 0;         
+ 370   2        }
+ 371   1        if(ret_status == SUCCESS)
+ 372   1        {
+ 373   2               switch(motor_cmd)
+ 374   2             {
+ 375   3               case CMD_MOTOR_TURN_OFF:
+ 376   3               case CMD_MOTOR_TURN_CLOCKWISE:
+ 377   3               break;
+ 378   3               default:
+ 379   3                  UART_Tx_Str(": Invalid motor command");
+ 380   3                  ret_status = ERR_CMD_MOTOR_TURN_INVALID;           
+ 381   3           }        
+ 382   2        } 
+ 383   1          if(ret_status == SUCCESS) 
+ 384   1          {   
+ 385   2             switch(motor_ids[motor_id].cur_fsm_motor_state)
+ 386   2            {
+ 387   3              case FSM_MOTOR_IN_OFF:
+ 388   3                  switch(motor_cmd)
+ 389   3                  {
+ 390   4                      case CMD_MOTOR_TURN_OFF: 
+ 391   4                    UART_Tx_Str(already_str); 
+ 392   4                      UART_Tx_Str(motor_off_cmd_str); 
+ 393   4                      ret_status = MOTOR_ALREADY_OFF; 
+ 394   4                          break;            
+ 395   4                  }        
+ 396   3              break;
+ 397   3              case FSM_MOTOR_IN_CLOCKWISE:
+ 398   3                  switch(motor_cmd)
+ 399   3                {
+ 400   4                      case CMD_MOTOR_TURN_CLOCKWISE:
+ 401   4                    UART_Tx_Str(already_str); 
+ 402   4                  UART_Tx_Str(motor_clockwise_cmd_str);   
+ 403   4                    ret_status = MOTOR_ALREADY_RUN_CLOCKWISE;   
+ 404   4                          break;            
+ 405   4                 }      
+ 406   3              break;
+ 407   3              default:
+ 408   3                 motor_ids[motor_id].cur_fsm_motor_state = FSM_MOTOR_IN_UNKNOWN_STATE;
+ 409   3                 UART_Tx_Str("in unknown state\r"); 
+ 410   3                 ret_status = ERR_MOTOR_UNKNOWN_STATE;        
+ 411   3           }         
+ 412   2        }
+ 413   1        if(ret_status == SUCCESS)
+ 414   1        {
+ 415   2            UART_Tx_Str("triggered ");
+ 416   2            switch(motor_cmd)
+ 417   2            {
+ 418   3             case CMD_MOTOR_TURN_OFF:
+ 419   3                  if(motor_ids[motor_id].cur_fsm_motor_state != FSM_MOTOR_IN_OFF)
+C51 COMPILER V9.60.0.0   MAIN                                                              05/20/2023 19:29:45 PAGE 8   
+
+ 420   3                  { 
+ 421   4                    DC_Motor_Cmd_Off(motor_id);                   
+ 422   4                        UART_Tx_Str(motor_off_cmd_str); 
+ 423   4                          ret_status = MOTOR_TURNED_OFF;
+ 424   4                  }
+ 425   3                 break;
+ 426   3                 case CMD_MOTOR_TURN_CLOCKWISE:
+ 427   3                  if(motor_ids[motor_id].cur_fsm_motor_state != FSM_MOTOR_IN_CLOCKWISE)
+ 428   3                  {
+ 429   4                    DC_Motor_Cmd_Clockwise(motor_id);                               
+ 430   4                    UART_Tx_Str(motor_clockwise_cmd_str); 
+ 431   4                          ret_status = MOTOR_TURNED_CLOCKWISE;
+ 432   4                  }
+ 433   3              break;      
+ 434   3                  default:
+ 435   3                     ;          
+ 436   3            }
+ 437   2        }
+ 438   1        UART_Tx_Char(NEXT_LINE_CHAR);
+ 439   1        switch(ret_status)
+ 440   1        {
+ 441   2             case MOTOR_ALREADY_OFF:
+ 442   2             case MOTOR_TURNED_OFF:
+ 443   2           case MOTOR_ALREADY_RUN_CLOCKWISE:
+ 444   2             case MOTOR_TURNED_CLOCKWISE:
+ 445   2             case SUCCESS:
+ 446   2                  ERROR_LED = STATE_OFF;
+ 447   2               break;
+ 448   2               default:
+ 449   2                  ERROR_LED = STATE_ON;
+ 450   2        } 
+ 451   1        return ret_status; 
+ 452   1      }
+ 453          
+ 454          
+ 455          /*------------------------------------------------------------*
+ 456          FUNCTION NAME  : DC_Motor_Init
+ 457          
+ 458          DESCRIPTION    :
+ 459                          
+ 460          INPUT          : 
+ 461          
+ 462          OUTPUT         : 
+ 463          
+ 464          NOTE           : 
+ 465          
+ 466          Func ID        :   
+ 467          -*------------------------------------------------------------*/
+ 468          unsigned char DC_Motor_Init(const unsigned int cur_motor_id, const unsigned char init_fsm_motor_state)
+ 469          {
+ 470   1         if(cur_motor_id >= NUM_MOTORS || init_fsm_motor_state >= NUM_FSM_MOTOR_STATES)
+ 471   1        {
+ 472   2          UART_Tx_Str("ERR: Motor Init \r");
+ 473   2          ERROR_LED = STATE_ON;
+ 474   2          return ERR_DATA_NOT_IN_RANGE; 
+ 475   2        } 
+ 476   1        switch(cur_motor_id)
+ 477   1        {
+ 478   2            case 0:
+ 479   2               MOTOR_1_DRIVER_IN1 = 0;
+ 480   2               MOTOR_1_DRIVER_IN2 = 0;
+ 481   2               MOTOR_1_DRIVER_EN1 = 0;
+C51 COMPILER V9.60.0.0   MAIN                                                              05/20/2023 19:29:45 PAGE 9   
+
+ 482   2               MOTOR_1_OFF_LED = 0;
+ 483   2               MOTOR_1_CLOCKWISE_LED = 0;
+ 484   2            break;
+ 485   2            case 1:
+ 486   2               MOTOR_2_DRIVER_IN1 = 0;
+ 487   2               MOTOR_2_DRIVER_IN2 = 0;
+ 488   2               MOTOR_2_DRIVER_EN1 = 0;
+ 489   2               MOTOR_2_OFF_LED = 0;
+ 490   2               MOTOR_2_CLOCKWISE_LED = 0;
+ 491   2            break;  
+ 492   2        }
+ 493   1        motor_ids[cur_motor_id].init_state = init_fsm_motor_state;
+ 494   1        motor_ids[cur_motor_id].motor_id = cur_motor_id;
+ 495   1        switch(init_fsm_motor_state)
+ 496   1        {
+ 497   2          case CMD_MOTOR_TURN_OFF:
+ 498   2              DC_Motor_Cmd_Off(cur_motor_id);         
+ 499   2          break;
+ 500   2          case CMD_MOTOR_TURN_CLOCKWISE:
+ 501   2             DC_Motor_Cmd_Clockwise(cur_motor_id);
+ 502   2          break;   
+ 503   2        } 
+ 504   1        return SUCCESS; 
+ 505   1      }
+ 506             
+ 507          /*------------------------------------------------------------*
+ 508          FUNCTION NAME  : DC_Motor_Cmd_Off
+ 509          
+ 510          DESCRIPTION    :
+ 511                          
+ 512          INPUT          : 
+ 513          
+ 514          OUTPUT         : 
+ 515          
+ 516          NOTE           : 
+ 517          
+ 518          Func ID        :   
+ 519          -*------------------------------------------------------------*/
+ 520          unsigned char DC_Motor_Cmd_Off(const unsigned int motor_id)
+ 521          {
+ 522   1        switch(motor_id)
+ 523   1        {
+ 524   2          case 0:
+ 525   2               MOTOR_1_DRIVER_IN1 = STATE_OFF;
+ 526   2               MOTOR_1_DRIVER_IN2 = STATE_OFF;
+ 527   2               MOTOR_1_DRIVER_EN1 = STATE_OFF;
+ 528   2               MOTOR_1_OFF_LED = STATE_ON;
+ 529   2               MOTOR_1_CLOCKWISE_LED = STATE_OFF;     
+ 530   2              break;
+ 531   2              case 1:
+ 532   2                 MOTOR_2_DRIVER_IN1 = STATE_OFF;
+ 533   2               MOTOR_2_DRIVER_IN2 = STATE_OFF;
+ 534   2               MOTOR_2_DRIVER_EN1 = STATE_OFF;
+ 535   2               MOTOR_2_OFF_LED = STATE_ON;
+ 536   2               MOTOR_2_CLOCKWISE_LED = STATE_OFF; 
+ 537   2              break;
+ 538   2              default:
+ 539   2                return ERR_MOTOR_ID_INVALID;        
+ 540   2        }
+ 541   1         motor_ids[motor_id].cur_fsm_motor_state = FSM_MOTOR_IN_OFF;
+ 542   1        return SUCCESS;
+ 543   1      }
+C51 COMPILER V9.60.0.0   MAIN                                                              05/20/2023 19:29:45 PAGE 10  
+
+ 544          
+ 545          /*------------------------------------------------------------*
+ 546          FUNCTION NAME  : DC_Motor_Cmd_Clockwise
+ 547          
+ 548          DESCRIPTION    :
+ 549                          
+ 550          INPUT          : 
+ 551          
+ 552          OUTPUT         : 
+ 553          
+ 554          NOTE           : 
+ 555          
+ 556          Func ID        :   
+ 557          -*------------------------------------------------------------*/
+ 558          unsigned char DC_Motor_Cmd_Clockwise(const unsigned int motor_id)
+ 559          {
+ 560   1        switch(motor_id)
+ 561   1        {
+ 562   2          case 0:
+ 563   2             MOTOR_1_DRIVER_EN1 = STATE_ON;
+ 564   2                 MOTOR_1_DRIVER_IN1 = STATE_ON;
+ 565   2             MOTOR_1_DRIVER_IN2 = STATE_OFF;
+ 566   2             MOTOR_1_OFF_LED = STATE_OFF;
+ 567   2             MOTOR_1_CLOCKWISE_LED = STATE_ON;
+ 568   2              break;
+ 569   2              case 1:
+ 570   2                 MOTOR_2_DRIVER_EN1 = STATE_ON;
+ 571   2                 MOTOR_2_DRIVER_IN1 = STATE_ON;
+ 572   2             MOTOR_2_DRIVER_IN2 = STATE_OFF;
+ 573   2             MOTOR_2_OFF_LED = STATE_OFF;
+ 574   2             MOTOR_2_CLOCKWISE_LED = STATE_ON;
+ 575   2              break;
+ 576   2              default:
+ 577   2                return ERR_MOTOR_ID_INVALID;        
+ 578   2        }
+ 579   1        motor_ids[motor_id].cur_fsm_motor_state = FSM_MOTOR_IN_CLOCKWISE;
+ 580   1        return SUCCESS;
+ 581   1      }
+ 582          
+ 583          /*------------------------------------------------------------*
+ 584          FUNCTION NAME  : Delay_in_Micro_Sec
+ 585          
+ 586          DESCRIPTION    :
+ 587                          
+ 588          INPUT          : 
+ 589          
+ 590          OUTPUT         : 
+ 591          
+ 592          NOTE           : 
+ 593          
+ 594          Func ID        :   
+ 595          -*------------------------------------------------------------*/
+ 596          void Delay_in_Micro_Sec(const unsigned long num_micro_seconds)
+ 597          {
+ 598   1        unsigned int i = 0;
+ 599   1        
+ 600   1        for (i = 0;  i < num_micro_seconds; ++i);
+ 601   1        return;   
+ 602   1      }
+ 603          
+ 604          /*------------------------------------------------------------*
+ 605          FUNCTION NAME  : Delay_in_Milli_Sec
+C51 COMPILER V9.60.0.0   MAIN                                                              05/20/2023 19:29:45 PAGE 11  
+
+ 606          
+ 607          DESCRIPTION    :
+ 608                          
+ 609          INPUT          : 
+ 610          
+ 611          OUTPUT         : 
+ 612          
+ 613          NOTE           : 
+ 614          
+ 615          Func ID        :   
+ 616          -*------------------------------------------------------------*/
+ 617          void Delay_in_Milli_Sec(const unsigned long num_milli_seconds)
+ 618          {
+ 619   1        unsigned int i = 0;
+ 620   1        
+ 621   1        for (i = 0;  i < num_milli_seconds; ++i)
+ 622   1          Delay_in_Micro_Sec(500UL);
+ 623   1        return; 
+ 624   1      }
+ 625          
+ 626          
+ 627          /*------------------------------------------------------------*
+ 628          FUNCTION NAME  : Str_Fill_Char
+ 629          
+ 630          DESCRIPTION    :
+ 631                          
+ 632          INPUT          : 
+ 633          
+ 634          OUTPUT         : 
+ 635          
+ 636          NOTE           : 
+ 637          
+ 638          Func ID        :    
+ 639          -*------------------------------------------------------------*/
+ 640          unsigned int Str_Fill_Char(char *const dest_str, const unsigned char num_chars, const char fill_char)
+ 641          {
+ 642   1        unsigned char index;
+ 643   1        
+ 644   1        if(dest_str == NULL_PTR || num_chars > STR_MAX_NUM_CHARS)
+ 645   1        {
+ 646   2          UART_Tx_Str("ERR: Str_Fill\r");
+ 647   2          return ERR_INVALID_DATA;
+ 648   2        }
+ 649   1        for (index = 0 ; index < num_chars ; ++index)
+ 650   1           dest_str[index] = fill_char;
+ 651   1          dest_str[index] = NULL_CHAR;
+ 652   1        
+ 653   1        return SUCCESS;
+ 654   1      }
+ 655          
+ 656          #ifdef UNUSED
+              /*------------------------------------------------------------*
+              FUNCTION NAME  : Str_Cmp
+              
+              DESCRIPTION    :
+                              
+              INPUT          : 
+              
+              OUTPUT         : 
+              
+              NOTE           : 
+              
+C51 COMPILER V9.60.0.0   MAIN                                                              05/20/2023 19:29:45 PAGE 12  
+
+              Func ID        :    
+              -*------------------------------------------------------------*/
+              unsigned int Str_Cmp(const char *const left_str, const char *const right_str, const unsigned char start_ch
+             -ar_pos, const unsigned char num_chars_str_cmp)
+              {
+                unsigned int index;
+                
+                if(left_str == NULL_PTR || right_str == NULL_PTR || (start_char_pos + num_chars_str_cmp) > STR_MAX_NUM_CH
+             -ARS)
+                {
+                  UART_Tx_Str("ERR: Str_Cmp\r");
+                  return (STR_MAX_NUM_CHARS + 1);
+                } 
+                for (index = 0 ; index < num_chars_str_cmp ; ++index)
+                {
+                  if((*(left_str + index + start_char_pos)) != (*(right_str + index + start_char_pos)))
+                  {
+                    /*#ifdef TRACE 
+                        UART_Tx_Char(right_str[index + start_char_pos]);
+                      UART_Tx_Char(NEXT_LINE_CHAR);
+                      #endif */
+                    return (index + start_char_pos + 1); 
+                  }
+                  if ((*(right_str + index + start_char_pos)) == NULL_CHAR)
+                     return 0 ;  
+                } 
+                 return 0 ;  
+              }
+              
+              /*------------------------------------------------------------*
+              FUNCTION NAME  : Str_Join
+              
+              DESCRIPTION    :
+                              
+              INPUT          : 
+              
+              OUTPUT         : 
+              
+              NOTE           : 
+              
+              Func ID        :    
+              -*------------------------------------------------------------*/
+              unsigned int Str_Join(char *const str_join_str, const char *const left_src_str, const char *const right_sr
+             -c_str)
+              {
+                unsigned char str_join_str_index, src_str_index;
+                
+                if(str_join_str == NULL_PTR || left_src_str == NULL_PTR || right_src_str == NULL_PTR)
+                {
+                  UART_Tx_Str("ERR: Str_Join Ptr\r");
+                  return ERR_NULL_PTR;
+                }
+                
+                  for(str_join_str_index = 0 ; ((*(left_src_str + str_join_str_index)) != NULL_CHAR); ++str_join_str_ind
+             -ex)
+                {
+                  if(str_join_str_index + 1 >= STR_MAX_NUM_CHARS)
+                  {
+                    UART_Tx_Str("ERR: Str_Join left Str\r");
+                    return ERR_DATA_NOT_IN_RANGE;
+                  }
+                  *(str_join_str + str_join_str_index) = *(left_src_str + str_join_str_index);
+C51 COMPILER V9.60.0.0   MAIN                                                              05/20/2023 19:29:45 PAGE 13  
+
+                }
+                   
+                  for (src_str_index = 0; (*((right_src_str + src_str_index)) != NULL_CHAR); ++src_str_index, ++str_join
+             -_str_index) 
+                {
+                  if(str_join_str_index + 1 >= STR_MAX_NUM_CHARS)
+                  {
+                    UART_Tx_Str("ERR: Str_Join right Str\r");
+                    return ERR_DATA_NOT_IN_RANGE;
+                  }
+                      *(str_join_str + str_join_str_index) = *(right_src_str + src_str_index); 
+                }
+                  *(str_join_str + str_join_str_index) = NULL_CHAR;
+                
+                 /* #ifdef TRACE
+                  UART_Tx_Str(str_join_str);
+                  UART_Tx_Char(NEXT_LINE_CHAR);
+                #endif  */
+                
+                return SUCCESS;
+              }
+              
+              /*------------------------------------------------------------*
+              FUNCTION NAME  : Str_Cat
+              
+              DESCRIPTION    :
+                              
+              INPUT          : 
+              
+              OUTPUT         : 
+              
+              NOTE           : 
+              
+              Func ID        :    
+              -*------------------------------------------------------------*/
+              unsigned int Str_Cat(char *const str_cat_str, const char *const src_str)
+              {
+                unsigned char str_cat_str_index = 0, src_str_index;
+                
+                if(str_cat_str == NULL_PTR || src_str == NULL_PTR)
+                {
+                  UART_Tx_Str("ERR: Str_Cat Ptr\r");
+                  return ERR_NULL_PTR;
+                } 
+                  while (((*(str_cat_str + str_cat_str_index)) != NULL_CHAR) )
+                {
+                  if(str_cat_str_index + 1 >= STR_MAX_NUM_CHARS)
+                    return ERR_DATA_NOT_IN_RANGE;
+                      ++str_cat_str_index;
+                } 
+                 // concatenate str_cat_str to src_str
+                  for (src_str_index = 0; ((*(src_str + src_str_index)) != NULL_CHAR); ++src_str_index, ++str_cat_str_in
+             -dex) 
+                {
+                  if(str_cat_str_index + 1 >= STR_MAX_NUM_CHARS)
+                  {
+                    UART_Tx_Str("ERR: Str_Cat chars\r");
+                    return ERR_DATA_NOT_IN_RANGE;
+                  }
+                      *(str_cat_str + str_cat_str_index) = *(src_str + src_str_index);  
+                }
+                  *(str_cat_str + str_cat_str_index) = NULL_CHAR;
+C51 COMPILER V9.60.0.0   MAIN                                                              05/20/2023 19:29:45 PAGE 14  
+
+                
+                return SUCCESS;
+              }
+              
+              #endif
+ 791          
+ 792          /*------------------------------------------------------------------*-
+ 793            ---- END OF FILE -------------------------------------------------
+ 794          -*------------------------------------------------------------------*/   
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1945    ----
+   CONSTANT SIZE    =    530    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     35      49
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
