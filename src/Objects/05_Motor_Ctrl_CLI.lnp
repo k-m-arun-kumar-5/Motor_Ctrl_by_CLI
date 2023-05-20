@@ -1,0 +1,5 @@
+".\Objects\STARTUP.obj",
+".\Objects\main.obj",
+".\Objects\uart.obj" 
+TO ".\Objects\05_Motor_Ctrl_CLI" 
+PRINT(".\Listings\05_Motor_Ctrl_CLI.m51") RAMSIZE(256) 
