@@ -13,7 +13,7 @@ In all my respective repositories, I, K.M. Arun Kumar alias Arunkumar Murugeswar
 
 My Thanks and Tribute :
 ========================
-I, thank to my family, Friends, Teachers, People behind the toolchains and references that I used, all those who directly or indirectly supported me and/or helped me and/or my family, Nature and God. My tribute to my family, Friends, Teachers, People behind the toolchains and references that I used, Nature, Jimmy Dog, God and all those, who directly or indirectly help and/or support me and/or my family.
+I, K.M. Arun Kumar alias Arunkumar Murugeswaran, thank to my family, Friends, Teachers, People behind the toolchains and references that I used, all those who directly or indirectly supported me and/or helped me and/or my family, Nature and God. My tribute to my family, Friends, Teachers, People behind the toolchains and references that I used, Nature, Jimmy Dog, God and all those, who directly or indirectly help and/or support me and/or my family.
 
 Toolchains that I used for AT89C52 Application design and development are as follows :
 ======================================================================================
