@@ -18,8 +18,8 @@ I, thank to my family, Friends, Teachers, People behind the toolchains and refer
 Toolchains that I used for AT89C52 Application design and development are as follows :
 ======================================================================================
 1: IDE and Compiler for Application development of AT89C52            - Keil uvision 4 v9.60a for C51 Development Tools with C51 Compiler.
-2: CAD                                                                - Proteus 8.3 / Proteus 8.11. 
-3: Desktop Computer Architecture and OS for development of AT89C51    - Intel X64 & Windows 8.1 (64 bit).
+2: CAD                                                                - Proteus 8.11. 
+3: Desktop Computer Architecture and OS for development of AT89C51    - Intel X64 & Windows 10 (64 bit).
 4: Code editor                                                        - Notepad++.
 5: Documentation                                                      - Microsoft Office 2007 (alternative LibreOffice) and Text Editor.
 6: File Archiver                                                      - 7-Zip.              
