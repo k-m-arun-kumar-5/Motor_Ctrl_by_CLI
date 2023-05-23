@@ -15,9 +15,9 @@ My Thanks and Tribute :
 ========================
 I, thank to my family, Friends, Teachers, People behind the toolchains and references that I used, all those who directly or indirectly supported me and/or helped me and/or my family, Nature and God. My tribute to my family, Friends, Teachers, People behind the toolchains and references that I used, Nature, Jimmy Dog, God and all those, who directly or indirectly help and/or support me and/or my family.
 
-Toolchains that I used for AT89C51 Application design and development are as follows :
+Toolchains that I used for AT89C52 Application design and development are as follows :
 ======================================================================================
-1: IDE and Compiler for Application development of AT89C51            - Keil uvision 4 for C51 Development Tools with C51 Compiler.
+1: IDE and Compiler for Application development of AT89C52            - Keil uvision 4 v9.60a for C51 Development Tools with C51 Compiler.
 2: CAD                                                                - Proteus 8.3 / Proteus 8.11. 
 3: Desktop Computer Architecture and OS for development of AT89C51    - Intel X64 & Windows 8.1 (64 bit).
 4: Code editor                                                        - Notepad++.
